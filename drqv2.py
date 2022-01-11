@@ -7,10 +7,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from torchvision import transforms
+from kornia.augmentation import RandomCrop, RandomErasing
 import utils
 
-
+AUGMENTATION = {
+    'crop': RandomCrop,
+    'erase': RandomErasing
+}
 class RandomShiftsAug(nn.Module):
     def __init__(self, pad):
         super().__init__()
@@ -19,32 +23,31 @@ class RandomShiftsAug(nn.Module):
     def forward(self, x):
         n, c, h, w = x.size()
         assert h == w
-        padding = tuple([self.pad] * 4)
+        padding = tuple([self.pad] * 4)  # (4, 4, 4, 4)
         x = F.pad(x, padding, 'replicate')
         eps = 1.0 / (h + 2 * self.pad)
-        arange = torch.linspace(-1.0 + eps,
-                                1.0 - eps,
-                                h + 2 * self.pad,
-                                device=x.device,
-                                dtype=x.dtype)[:h]
+        arange = torch.linspace(-1.0 + eps, 1.0 - eps, h +
+                                2 * self.pad, device=x.device, dtype=x.dtype)[:h]
         arange = arange.unsqueeze(0).repeat(h, 1).unsqueeze(2)
         base_grid = torch.cat([arange, arange.transpose(1, 0)], dim=2)
         base_grid = base_grid.unsqueeze(0).repeat(n, 1, 1, 1)
 
-        shift = torch.randint(0,
-                              2 * self.pad + 1,
-                              size=(n, 1, 1, 2),
-                              device=x.device,
-                              dtype=x.dtype)
+        shift = torch.randint(
+            0, 2 * self.pad + 1, size=(n, 1, 1, 2), device=x.device, dtype=x.dtype)
         shift *= 2.0 / (h + 2 * self.pad)
 
         grid = base_grid + shift
-        return F.grid_sample(x,
-                             grid,
-                             padding_mode='zeros',
-                             align_corners=False)
+        return F.grid_sample(x, grid, padding_mode='zeros', align_corners=False)
 
-
+def augmentation(aug, size):
+    augs = []
+    if 'crop' in aug.keys():
+        aug.crop.size = size
+        augs.append(RandomCrop(size=aug.crop.size, padding=aug.crop.padding, padding_mode=aug.crop.mode))
+    if 'erase' in aug.keys():
+        augs.append(RandomErasing(p=aug.erase.p, scale=aug.erase.scale, ratio=aug.erase.ratio))
+    return transforms.Compose(augs)
+    
 class Encoder(nn.Module):
     def __init__(self, obs_shape):
         super().__init__()
@@ -124,7 +127,7 @@ class Critic(nn.Module):
 class DrQV2Agent:
     def __init__(self, obs_shape, action_shape, device, lr, feature_dim,
                  hidden_dim, critic_target_tau, num_expl_steps,
-                 update_every_steps, stddev_schedule, stddev_clip, use_tb):
+                 update_every_steps, stddev_schedule, stddev_clip, use_tb, aug):
         self.device = device
         self.critic_target_tau = critic_target_tau
         self.update_every_steps = update_every_steps
@@ -150,7 +153,7 @@ class DrQV2Agent:
         self.critic_opt = torch.optim.Adam(self.critic.parameters(), lr=lr)
 
         # data augmentation
-        self.aug = RandomShiftsAug(pad=4)
+        self.aug = augmentation(aug, obs_shape[1:])
 
         self.train()
         self.critic_target.train()
@@ -239,7 +242,7 @@ class DrQV2Agent:
 
         # augment
         obs = self.aug(obs.float())
-        next_obs = self.aug(next_obs.float())
+        next_obs = self.aug(next_obs.float()) # TODO: test svea tricks
         # encode
         obs = self.encoder(obs)
         with torch.no_grad():

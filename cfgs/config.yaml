@@ -1,6 +1,9 @@
 defaults:
   - _self_
   - task@_global_: quadruped_walk
+  - aug@_group_:
+      - crop
+      - erase
   - override hydra/launcher: submitit_local
 
 # task settings
@@ -10,14 +13,14 @@ discount: 0.99
 # train settings
 num_seed_frames: 4000
 # eval
-eval_every_frames: 10000
+eval_every_frames: 50000
 num_eval_episodes: 10
 # snapshot
 save_snapshot: false
 # replay buffer
 replay_buffer_size: 1000000
 replay_buffer_num_workers: 4
-nstep: 3
+nstep: 3 # n_step reward
 batch_size: 256
 # misc
 seed: 1
@@ -29,12 +32,13 @@ use_tb: true
 experiment: exp
 # agent
 lr: 1e-4
-feature_dim: 50
+feature_dim: 50 # image embedding dim
 
 agent:
   _target_: drqv2.DrQV2Agent
   obs_shape: ??? # to be specified later
   action_shape: ??? # to be specified later
+  aug: ???
   device: ${device}
   lr: ${lr}
   critic_target_tau: 0.01
@@ -54,7 +58,7 @@ hydra:
     subdir: ${hydra.job.num}
   launcher:
     timeout_min: 4300
-    cpus_per_task: 10
+    cpus_per_task: 8
     gpus_per_node: 1
     tasks_per_node: 1
     mem_gb: 160

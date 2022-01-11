@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 import random
 import re
+import os
 import time
 
 import numpy as np
@@ -13,7 +14,12 @@ import torch.nn.functional as F
 from omegaconf import OmegaConf
 from torch import distributions as pyd
 from torch.distributions.utils import _standard_normal
+import socket
+import libtmux
+import pygit2 as pg
 
+chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" #these are the digits you will use for conversion back and forth
+charsLen = len(chars)
 
 class eval_mode:
     def __init__(self, *models):
@@ -147,3 +153,81 @@ def schedule(schdl, step):
                 mix = np.clip((step - duration1) / duration2, 0.0, 1.0)
                 return (1.0 - mix) * final1 + mix * final2
     raise NotImplementedError(schdl)
+
+def int2alphanumeric(num):
+    assert round(num) == num and num >= 1
+    s = ""
+    while num:
+        s = chars[num % charsLen - 1] + s
+        num //= charsLen
+    return(s)
+
+def alphanumeric2int(numStr):
+  num = 0
+  for i, c in enumerate(reversed(numStr)):
+    num += (chars.index(c) + 1) * (charsLen ** i)
+  return(num)
+
+def get_col(titles, title):
+    assert title in titles, 'wrong title %s!' % title
+    return int2alphanumeric(titles.index(title) + 1)
+
+def auto_commit(tag):
+    repo = pg.Repository('./')
+    # if 'logging' not in list(repo.branches):
+    #     os.system('git checkout -b logging')
+    # else:
+    #     os.system('git checkout logging')
+    # if repo.diff().stats.files_changed:
+    #     print('change detected, input commit message, enter to use tag %s, input n to skip this commit:' % tag)
+    #     msg = input()
+    #     if not msg == 'n':
+    #         os.system('git add .')
+    #         # repo.index.add_all()
+    #         # author = pg.Signature('Kaizhe Hu', 'hukz18@mails.tsinghua.edu.cn')
+    #         os.system("git commit -m '%s'" % (msg or tag))
+    return repo.head.target.hex
+
+def create_log(wks, args, cfg, hex, start_time):
+    def next_available_row(worksheet):
+        str_list = list(filter(None, worksheet.col_values(1)))
+        return str(len(str_list) + 1)
+    server = libtmux.Server()
+    session = server.attached_sessions[0].get('session_name')
+    id =  server.attached_sessions[0].attached_window.get('window_index')
+    row_pos = next_available_row(wks)
+    row = [
+        args.config,
+        start_time.strftime('%Y/%m/%d %H:%M'),
+        '', # end_time
+        '', # duration
+        hex[:8], # git commit hash
+        socket.gethostname(), # machine
+        len(os.environ['CUDA_VISIBLE_DEVICES'].split(',')), # GPUs
+        args.seeds, # seeds
+        ':'.join([session, id]), # Tmux
+        '%g' % cfg.num_train_frames, # max_steps
+        cfg.batch_size,
+        cfg.nstep,
+        cfg.frame_stack,
+        cfg.action_repeat,
+        cfg.feature_dim,
+        cfg.agent.stddev_clip,
+        args.task,
+        str(cfg.aug),
+        '', # performance
+        '', # solved trajectory
+        args.tag
+    ]
+    wks.insert_row(row, int(row_pos), "user_entered")
+    return wks
+
+def end_log(wks, args, res, start_time, end_time):
+    titles = list(filter(None, wks.row_values(1)))
+    id_list = list(filter(None, wks.col_values(1)))
+    row_pos = str(id_list.index(args.config) + 1)
+    time_delta = end_time - start_time
+    wks.update(get_col(titles, 'Finish (UTC+8)') + row_pos, end_time.strftime('%Y/%m/%d %H:%M'))
+    wks.update(get_col(titles, 'Duration') + row_pos, '%dd %dh %dm' % (time_delta.days, time_delta.seconds // 3600, (time_delta.seconds % 3600) // 60 ))
+    wks.update(get_col(titles, 'Performance') + row_pos, res.performance)
+    wks.update(get_col(titles, 'Solved trajectory') + row_pos, res.solved_traj)

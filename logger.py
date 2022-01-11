@@ -160,6 +160,26 @@ class Logger(object):
         return LogAndDumpCtx(self, step, ty)
 
 
+class DummyLogger():
+    def __init__(self):
+        pass
+
+    def _try_sw_log(self, key, value, step):
+        pass
+
+    def log(self, key, value, step):
+        pass
+
+    def log_metrics(self, metrics, step, ty):
+        pass
+
+    def dump(self, step, ty=None):
+        pass
+
+    def log_and_dump_ctx(self, step, ty):
+        return DummyLogAndDumpCtx(self, step, ty)
+
+
 class LogAndDumpCtx:
     def __init__(self, logger, step, ty):
         self._logger = logger
@@ -174,3 +194,16 @@ class LogAndDumpCtx:
 
     def __exit__(self, *args):
         self._logger.dump(self._step, self._ty)
+
+class DummyLogAndDumpCtx:
+    def __init__(self, logger, step, ty):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __call__(self, key, value):
+        pass
+
+    def __exit__(self, *args):
+        pass

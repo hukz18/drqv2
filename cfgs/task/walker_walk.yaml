@@ -5,3 +5,4 @@ defaults:
 task_name: walker_walk
 nstep: 1
 batch_size: 512
+threshold: 700

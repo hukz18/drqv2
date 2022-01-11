@@ -3,3 +3,4 @@ defaults:
   - _self_
 
 task_name: hopper_hop
+threshold: 300
