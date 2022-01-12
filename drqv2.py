@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torchvision import transforms
 from kornia.augmentation import RandomCrop, RandomErasing
 import utils
-
+# tensorboard --logdir ./ --port 6006 --host localhost
 AUGMENTATION = {
     'crop': RandomCrop,
     'erase': RandomErasing

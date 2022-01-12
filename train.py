@@ -26,7 +26,7 @@ from dm_env import specs
 import dmc
 import utils
 from logger import Logger, DummyLogger
-from replay_buffer import ReplayBufferStorage, make_replay_loader
+from simple_replay_buffer import ReplayBuffer
 from video import TrainVideoRecorder, VideoRecorder
 
 global args
@@ -76,12 +76,9 @@ class Workspace:
                       specs.Array((1,), np.float32, 'reward'),
                       specs.Array((1,), np.float32, 'discount'))
 
-        self.replay_storage = ReplayBufferStorage(data_specs, self.work_dir / 'buffer')
+        self.replay_buffer = ReplayBuffer(data_specs, self.cfg.replay_buffer_size, 
+            self.cfg.nstep, self.cfg.discount, self.cfg.batch_size)
 
-        self.replay_loader = make_replay_loader(
-            self.work_dir / 'buffer', self.cfg.replay_buffer_size,
-            self.cfg.batch_size, self.cfg.replay_buffer_num_workers,
-            self.cfg.save_snapshot and not args.debug, self.cfg.nstep, self.cfg.discount)
         self._replay_iter = None
 
         self.video_recorder = VideoRecorder(
@@ -105,7 +102,7 @@ class Workspace:
     @property
     def replay_iter(self):
         if self._replay_iter is None:
-            self._replay_iter = iter(self.replay_loader)
+            self._replay_iter = iter(self.replay_buffer)
         return self._replay_iter
 
     def eval(self):
@@ -145,11 +142,12 @@ class Workspace:
 
         episode_step, episode_reward = 0, 0
         time_step = self.train_env.reset()
-        self.replay_storage.add(time_step) # type: first step/midium step/last step, obs, act, rew
+        self.replay_buffer.add(time_step) # type: first step/midium step/last step, obs, act, rew
         self.train_video_recorder.init(time_step.observation)
         metrics = None
         while train_until_step(self.global_step):
             if time_step.last(): # episode ends
+                # ipdb.set_trace()
                 self._global_episode += 1
                 self.train_video_recorder.save(f'{self.global_frame}.mp4')
                 # wait until all the metrics schema is populated
@@ -164,16 +162,16 @@ class Workspace:
                         log('episode_reward', episode_reward)
                         log('episode_length', episode_frame)
                         log('episode', self.global_episode)
-                        log('buffer_size', len(self.replay_storage))
+                        log('buffer_size', len(self.replay_buffer))
                         log('step', self.global_step)
 
                 # reset env
                 time_step = self.train_env.reset()
-                self.replay_storage.add(time_step)
+                self.replay_buffer.add(time_step)
                 self.train_video_recorder.init(time_step.observation)
                 # try to save snapshot
-                if self.cfg.save_snapshot:
-                    self.save_snapshot()
+                # if self.cfg.save_snapshot:
+                #     self.save_snapshot()
                 if episode_reward > self.cfg.threshold:
                     break
                 episode_step = 0
@@ -199,7 +197,7 @@ class Workspace:
             # take env step
             time_step = self.train_env.step(action)
             episode_reward += time_step.reward
-            self.replay_storage.add(time_step)
+            self.replay_buffer.add(time_step)
             self.train_video_recorder.record(time_step.observation)
             episode_step += 1
             self._global_step += 1
@@ -225,8 +223,6 @@ def main(cfg):
     root_dir = Path.cwd()
     gc = gspread.service_account()
     wks = gc.open("GP - Kaizhe").worksheet('DrQ_v2')
-    import multiprocessing
-    print('cpu_count:', multiprocessing.cpu_count())
     # start_time = datetime.utcnow() + timedelta(hours=8)
     start_time = datetime.now()
     seeds = np.random.choice(0xff, args.seeds, replace=False).tolist()
@@ -239,9 +235,9 @@ def main(cfg):
     for seed in seeds:
         cfg.seed = seed
         workspace = W(cfg, args)
-        if snapshot.exists():
-            print(f'resuming: {snapshot}')
-            workspace.load_snapshot()
+        # if snapshot.exists():
+        #     print(f'resuming: {snapshot}')
+        #     workspace.load_snapshot()
         workspace.train()
         solved_traj.append(workspace.global_episode)
         workspace.logger.log('eval_total_time', workspace.timer.total_time(), workspace.global_frame)

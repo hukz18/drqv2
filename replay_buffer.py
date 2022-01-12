@@ -68,7 +68,7 @@ class ReplayBufferStorage:
             self._num_episodes += 1
             self._num_transitions += int(eps_len)
 
-    def _store_episode(self, episode):
+    def _store_episode(self, episode): # save one episode to npz file
         eps_idx = self._num_episodes
         eps_len = episode_len(episode)
         self._num_episodes += 1
@@ -97,7 +97,7 @@ class ReplayBuffer(IterableDataset):
         eps_fn = random.choice(self._episode_fns)
         return self._episodes[eps_fn]
 
-    def _store_episode(self, eps_fn):
+    def _store_episode(self, eps_fn): # store episode from npz file to memory(self._episodes[eps_fn] = load_episode(eps_fn))
         try:
             episode = load_episode(eps_fn)
         except:
@@ -107,7 +107,7 @@ class ReplayBuffer(IterableDataset):
             early_eps_fn = self._episode_fns.pop(0)
             early_eps = self._episodes.pop(early_eps_fn)
             self._size -= episode_len(early_eps)
-            early_eps_fn.unlink(missing_ok=True)
+            early_eps_fn.unlink(missing_ok=True) # delete early episode
         self._episode_fns.append(eps_fn)
         self._episode_fns.sort()
         self._episodes[eps_fn] = episode
@@ -117,7 +117,7 @@ class ReplayBuffer(IterableDataset):
             eps_fn.unlink(missing_ok=True)
         return True
 
-    def _try_fetch(self):
+    def _try_fetch(self): # try fetch data from npz to memory, using multiple workers
         if self._samples_since_last_fetch < self._fetch_every:
             return
         self._samples_since_last_fetch = 0
@@ -157,6 +157,8 @@ class ReplayBuffer(IterableDataset):
             step_reward = episode['reward'][idx + i]
             reward += discount * step_reward
             discount *= episode['discount'][idx + i] * self._discount
+        import ipdb
+        ipdb.set_trace()
         return (obs, action, reward, discount, next_obs)
 
     def __iter__(self):
