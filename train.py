@@ -37,7 +37,6 @@ def make_agent(obs_spec, action_spec, aug, cfg):
     cfg.obs_shape = obs_spec.shape
     cfg.action_shape = action_spec.shape
     cfg.aug = aug
-    cfg.aug.crop.size=obs_spec.shape[1:]
     return hydra.utils.instantiate(cfg)
     # from drqv2 import DrQV2Agent
     # cfg = dict(cfg)
@@ -53,7 +52,7 @@ class Workspace:
         self.cfg = cfg
         self.args = args
         utils.set_seed_everywhere(cfg.seed)
-        self.device = torch.device(cfg.device)
+        # self.device = torch.device(cfg.device)
         self.setup()
 
         self.agent = make_agent(self.train_env.observation_spec(),
@@ -226,6 +225,8 @@ def main(cfg):
     root_dir = Path.cwd()
     gc = gspread.service_account()
     wks = gc.open("GP - Kaizhe").worksheet('DrQ_v2')
+    import multiprocessing
+    print('cpu_count:', multiprocessing.cpu_count())
     # start_time = datetime.utcnow() + timedelta(hours=8)
     start_time = datetime.now()
     seeds = np.random.choice(0xff, args.seeds, replace=False).tolist()

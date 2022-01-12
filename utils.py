@@ -174,18 +174,18 @@ def get_col(titles, title):
 
 def auto_commit(tag):
     repo = pg.Repository('./')
-    # if 'logging' not in list(repo.branches):
-    #     os.system('git checkout -b logging')
-    # else:
-    #     os.system('git checkout logging')
-    # if repo.diff().stats.files_changed:
-    #     print('change detected, input commit message, enter to use tag %s, input n to skip this commit:' % tag)
-    #     msg = input()
-    #     if not msg == 'n':
-    #         os.system('git add .')
-    #         # repo.index.add_all()
-    #         # author = pg.Signature('Kaizhe Hu', 'hukz18@mails.tsinghua.edu.cn')
-    #         os.system("git commit -m '%s'" % (msg or tag))
+    if 'logging' not in list(repo.branches):
+        os.system('git checkout -b logging')
+    else:
+        os.system('git checkout logging')
+    if repo.diff().stats.files_changed:
+        print('change detected, input commit message, enter to use tag %s, input n to skip this commit:' % tag)
+        msg = input()
+        if not msg == 'n':
+            os.system('git add .')
+            # repo.index.add_all()
+            # author = pg.Signature('Kaizhe Hu', 'hukz18@mails.tsinghua.edu.cn')
+            os.system("git commit -m '%s'" % (msg or tag))
     return repo.head.target.hex
 
 def create_log(wks, args, cfg, hex, start_time):

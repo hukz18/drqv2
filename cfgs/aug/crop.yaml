@@ -1,4 +1,3 @@
 crop:
-  size: ???
   padding: 4
   mode: replicate

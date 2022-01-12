@@ -16,15 +16,16 @@ AUGMENTATION = {
     'erase': RandomErasing
 }
 class RandomShiftsAug(nn.Module):
-    def __init__(self, pad):
+    def __init__(self, pad, pad_mode):
         super().__init__()
         self.pad = pad
+        self.pad_mode = pad_mode
 
     def forward(self, x):
         n, c, h, w = x.size()
         assert h == w
         padding = tuple([self.pad] * 4)  # (4, 4, 4, 4)
-        x = F.pad(x, padding, 'replicate')
+        x = F.pad(x, padding, self.pad_mode)
         eps = 1.0 / (h + 2 * self.pad)
         arange = torch.linspace(-1.0 + eps, 1.0 - eps, h +
                                 2 * self.pad, device=x.device, dtype=x.dtype)[:h]
@@ -39,11 +40,10 @@ class RandomShiftsAug(nn.Module):
         grid = base_grid + shift
         return F.grid_sample(x, grid, padding_mode='zeros', align_corners=False)
 
-def augmentation(aug, size):
+def augmentation(aug):
     augs = []
     if 'crop' in aug.keys():
-        aug.crop.size = size
-        augs.append(RandomCrop(size=aug.crop.size, padding=aug.crop.padding, padding_mode=aug.crop.mode))
+        augs.append(RandomShiftsAug(aug.crop.padding, aug.crop.mode))
     if 'erase' in aug.keys():
         augs.append(RandomErasing(p=aug.erase.p, scale=aug.erase.scale, ratio=aug.erase.ratio))
     return transforms.Compose(augs)
@@ -153,7 +153,7 @@ class DrQV2Agent:
         self.critic_opt = torch.optim.Adam(self.critic.parameters(), lr=lr)
 
         # data augmentation
-        self.aug = augmentation(aug, obs_shape[1:])
+        self.aug = augmentation(aug)
 
         self.train()
         self.critic_target.train()
