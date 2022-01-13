@@ -26,9 +26,10 @@ from dm_env import specs
 import dmc
 import utils
 from logger import Logger, DummyLogger
-from simple_replay_buffer import ReplayBuffer
+from simple_replay_buffer import ReplayBuffer, make_replay_loader
 from video import TrainVideoRecorder, VideoRecorder
-
+import gtimer as gt
+from drqv2 import DrQV2Agent
 global args
 torch.backends.cudnn.benchmark = True
 
@@ -37,11 +38,11 @@ def make_agent(obs_spec, action_spec, aug, cfg):
     cfg.obs_shape = obs_spec.shape
     cfg.action_shape = action_spec.shape
     cfg.aug = aug
-    return hydra.utils.instantiate(cfg)
+    # return hydra.utils.instantiate(cfg)
     # from drqv2 import DrQV2Agent
-    # cfg = dict(cfg)
-    # cfg.pop('_target_')
-    # return DrQV2Agent(**cfg)
+    cfg = dict(cfg)
+    cfg.pop('_target_')
+    return DrQV2Agent(**cfg)
 
 
 class Workspace:
@@ -78,7 +79,8 @@ class Workspace:
 
         self.replay_buffer = ReplayBuffer(data_specs, self.cfg.replay_buffer_size, 
             self.cfg.nstep, self.cfg.discount, self.cfg.batch_size)
-
+        self.replay_loader = make_replay_loader(
+            self.replay_buffer, self.cfg.batch_size, self.cfg.replay_buffer_num_workers)
         self._replay_iter = None
 
         self.video_recorder = VideoRecorder(
@@ -102,7 +104,7 @@ class Workspace:
     @property
     def replay_iter(self):
         if self._replay_iter is None:
-            self._replay_iter = iter(self.replay_buffer)
+            self._replay_iter = iter(self.replay_loader)
         return self._replay_iter
 
     def eval(self):
@@ -134,6 +136,7 @@ class Workspace:
             log('step', self.global_step)
         return np.mean(rewards), np.std(rewards)
 
+    @gt.wrap
     def train(self):
         # predicates
         train_until_step = utils.Until(self.cfg.num_train_frames, self.cfg.action_repeat)
@@ -145,7 +148,10 @@ class Workspace:
         self.replay_buffer.add(time_step) # type: first step/midium step/last step, obs, act, rew
         self.train_video_recorder.init(time_step.observation)
         metrics = None
+        gt.stamp('start training')
+        train_loop = gt.timed_loop('train_loop')
         while train_until_step(self.global_step):
+            next(train_loop)
             if time_step.last(): # episode ends
                 # ipdb.set_trace()
                 self._global_episode += 1
@@ -167,6 +173,7 @@ class Workspace:
 
                 # reset env
                 time_step = self.train_env.reset()
+                
                 self.replay_buffer.add(time_step)
                 self.train_video_recorder.init(time_step.observation)
                 # try to save snapshot
@@ -176,32 +183,37 @@ class Workspace:
                     break
                 episode_step = 0
                 episode_reward = 0
+                gt.stamp('reset env', unique=False)
 
             # evaluate every cfg.eval_every_frames frame(50000)
             if eval_every_step(self.global_step):
                 self.logger.log('eval_total_time', self.timer.total_time(),
                                 self.global_frame)
                 self.eval()
+                gt.stamp('eval', unique=False)
 
             # sample action
             with torch.no_grad(), utils.eval_mode(self.agent):
                 action = self.agent.act(time_step.observation,
                                         self.global_step,
                                         eval_mode=False)
+                gt.stamp('get action', unique=False)
 
             # try to update the agent after origin frames
             if not seed_until_step(self.global_step):
                 metrics = self.agent.update(self.replay_iter, self.global_step)
                 self.logger.log_metrics(metrics, self.global_frame, ty='train')
+                gt.stamp('update', unique=False)
 
             # take env step
             time_step = self.train_env.step(action)
             episode_reward += time_step.reward
             self.replay_buffer.add(time_step)
+            gt.stamp('add timestep', unique=False)
             self.train_video_recorder.record(time_step.observation)
             episode_step += 1
             self._global_step += 1
-
+        train_loop.exit()
     def save_snapshot(self):
         snapshot = self.work_dir / 'snapshot.pt'
         keys_to_save = ['agent', 'timer', '_global_step', '_global_episode']
@@ -229,22 +241,25 @@ def main(cfg):
     if not args.debug:
         hex = utils.auto_commit(args.tag)
         utils.create_log(wks, args, cfg, hex, start_time) # TODO: modify create log here
-    snapshot = root_dir / 'snapshot.pt'
     avg_best, std_of_best = -np.Infinity, 0
     solved_traj = []
-    for seed in seeds:
+    for seed in gt.timed_for(seeds):
         cfg.seed = seed
         workspace = W(cfg, args)
+        gt.stamp('init workspace')
         # if snapshot.exists():
         #     print(f'resuming: {snapshot}')
         #     workspace.load_snapshot()
         workspace.train()
+        gt.stamp('training')
         solved_traj.append(workspace.global_episode)
         workspace.logger.log('eval_total_time', workspace.timer.total_time(), workspace.global_frame)
         mean, std = workspace.eval()
+        gt.stamp('eval')
         if mean > avg_best:
             avg_best, std_of_best = mean, std
             workspace.save_snapshot()
+            gt.stamp('save snapshot')
     res = EasyDict({
         'performance': '%.1f±%.1f' % (avg_best, std_of_best),
         'solved_traj': np.mean(solved_traj)
@@ -254,6 +269,8 @@ def main(cfg):
     print('used seeds:', seeds)
     if not args.debug:
         utils.end_log(wks, args, res, start_time, end_time)
+    with open('gtimer.log', 'w') as f:
+        f.write(gt.report(include_itrs=False, format_options = {'stamp_name_width': 30, 'itr_num_width': 10}))
 
 
 

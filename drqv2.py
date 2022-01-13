@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torchvision import transforms
 from kornia.augmentation import RandomCrop, RandomErasing
 import utils
+import gtimer as gt
 # tensorboard --logdir ./ --port 6006 --host localhost
 AUGMENTATION = {
     'crop': RandomCrop,
@@ -230,6 +231,7 @@ class DrQV2Agent:
 
         return metrics
 
+    @gt.wrap
     def update(self, replay_iter, step):
         metrics = dict()
 
@@ -237,16 +239,18 @@ class DrQV2Agent:
             return metrics
 
         batch = next(replay_iter)
+        gt.stamp('sample batch')
         obs, action, reward, discount, next_obs = utils.to_torch(
             batch, self.device)
-
         # augment
         obs = self.aug(obs.float())
         next_obs = self.aug(next_obs.float()) # TODO: test svea tricks
+        gt.stamp('augmentation')
         # encode
         obs = self.encoder(obs)
         with torch.no_grad():
             next_obs = self.encoder(next_obs)
+        gt.stamp('encoding')
 
         if self.use_tb:
             metrics['batch_reward'] = reward.mean().item()
@@ -254,10 +258,10 @@ class DrQV2Agent:
         # update critic
         metrics.update(
             self.update_critic(obs, action, reward, discount, next_obs, step))
-
+        gt.stamp('update critic')
         # update actor
         metrics.update(self.update_actor(obs.detach(), step))
-
+        gt.stamp('update actor')
         # update critic target
         utils.soft_update_params(self.critic, self.critic_target,
                                  self.critic_target_tau)

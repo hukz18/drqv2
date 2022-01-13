@@ -3,3 +3,4 @@ defaults:
   - _self_
 
 task_name: quadruped_walk
+threshold: 800
